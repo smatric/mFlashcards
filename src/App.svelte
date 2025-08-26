@@ -11,32 +11,47 @@
   let showDefinition = false;
   let sessionStats = { total: 0, known: 0, unknown: 0 };
   let isLoading = false;
+  let studyMode = 'word-to-definition'; // 'word-to-definition' or 'definition-to-word'
 
   const DISCOVERY_DOC = 'https://sheets.googleapis.com/$discovery/rest?version=v4';
   const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
   
-  let gapi, gis;
+  let gis;
 
   onMount(async () => {
     if (typeof window !== 'undefined') {
+      await waitForGoogleAPIs();
       await initializeGapi();
       await initializeGis();
       
       const savedToken = localStorage.getItem('google_access_token');
       if (savedToken) {
         accessToken = savedToken;
-        gapi.client.setToken({ access_token: accessToken });
+        window.gapi.client.setToken({ access_token: accessToken });
         isSignedIn = true;
       }
     }
   });
 
+  function waitForGoogleAPIs() {
+    return new Promise((resolve) => {
+      const checkAPIs = () => {
+        if (typeof window.gapi !== 'undefined' && typeof window.google !== 'undefined') {
+          resolve();
+        } else {
+          setTimeout(checkAPIs, 100);
+        }
+      };
+      checkAPIs();
+    });
+  }
+
   async function initializeGapi() {
     await new Promise((resolve) => {
-      gapi.load('client', resolve);
+      window.gapi.load('client', resolve);
     });
     
-    await gapi.client.init({
+    await window.gapi.client.init({
       discoveryDocs: [DISCOVERY_DOC],
     });
   }
@@ -49,7 +64,7 @@
         if (response.access_token) {
           accessToken = response.access_token;
           localStorage.setItem('google_access_token', accessToken);
-          gapi.client.setToken({ access_token: accessToken });
+          window.gapi.client.setToken({ access_token: accessToken });
           isSignedIn = true;
         }
       },
@@ -84,24 +99,65 @@
     
     isLoading = true;
     try {
-      const response = await gapi.client.sheets.spreadsheets.values.get({
+      // First, get spreadsheet metadata to check available sheets
+      const metadataResponse = await window.gapi.client.sheets.spreadsheets.get({
         spreadsheetId: selectedSpreadsheetId,
-        range: 'DeckData!A:B',
+      });
+      
+      const sheets = metadataResponse.result.sheets || [];
+      const sheetNames = sheets.map(sheet => sheet.properties.title);
+      console.log('Available sheets:', sheetNames);
+      
+      // Try to find mFlashcards sheet
+      if (!sheetNames.includes('mFlashcards')) {
+        throw new Error(`mFlashcards sheet not found. Available sheets: ${sheetNames.join(', ')}`);
+      }
+      
+      const response = await window.gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: selectedSpreadsheetId,
+        range: 'mFlashcards!A:B',
       });
       
       const rows = response.result.values || [];
-      if (rows.length > 1) {
-        spreadsheetData = rows.slice(1).map(([word, definition]) => ({
-          word: word || '',
-          definition: definition || ''
-        })).filter(item => item.word && item.definition);
-        
-        shuffleArray(spreadsheetData);
-        resetSession();
+      console.log('Raw data from sheet:', rows);
+      
+      if (rows.length === 0) {
+        throw new Error('mFlashcards sheet is empty');
       }
+      
+      if (rows.length === 1) {
+        throw new Error('mFlashcards sheet only has headers. Add some flashcard data below the headers.');
+      }
+      
+      // Skip header row and process data
+      spreadsheetData = rows.slice(1).map(([word, definition]) => ({
+        word: word || '',
+        definition: definition || ''
+      })).filter(item => item.word && item.definition);
+      
+      if (spreadsheetData.length === 0) {
+        throw new Error('No valid flashcard pairs found. Make sure both Word and Definition columns have data.');
+      }
+      
+      shuffleArray(spreadsheetData);
+      resetSession();
+      console.log('Loaded flashcards:', spreadsheetData);
+      
     } catch (error) {
       console.error('Error loading spreadsheet data:', error);
-      alert('Error loading spreadsheet data. Make sure you have the correct permissions and the sheet has a "DeckData" tab with Word and Definition columns.');
+      let errorMessage = 'Error loading spreadsheet data: ';
+      
+      if (error.status === 403) {
+        errorMessage += 'Permission denied. Make sure the spreadsheet is accessible and you have edit permissions.';
+      } else if (error.status === 404) {
+        errorMessage += 'Spreadsheet not found. Make sure you selected the correct file.';
+      } else if (error.message) {
+        errorMessage += error.message;
+      } else {
+        errorMessage += 'Unknown error occurred.';
+      }
+      
+      alert(errorMessage);
     } finally {
       isLoading = false;
     }
@@ -118,6 +174,11 @@
     currentCardIndex = 0;
     showDefinition = false;
     sessionStats = { total: 0, known: 0, unknown: 0 };
+  }
+
+  function toggleStudyMode() {
+    studyMode = studyMode === 'word-to-definition' ? 'definition-to-word' : 'word-to-definition';
+    showDefinition = false; // Reset card flip when changing mode
   }
 
   function nextCard() {
@@ -144,7 +205,7 @@
       const today = new Date().toISOString().split('T')[0];
       const values = [[today, sessionStats.total, sessionStats.known, sessionStats.unknown]];
       
-      await gapi.client.sheets.spreadsheets.values.append({
+      await window.gapi.client.sheets.spreadsheets.values.append({
         spreadsheetId: selectedSpreadsheetId,
         range: 'StatsData!A:D',
         valueInputOption: 'USER_ENTERED',
@@ -213,6 +274,12 @@
             >
               Save Stats
             </button>
+            <button
+              on:click={resetSession}
+              class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg transition-colors duration-200"
+            >
+              Reset Stats
+            </button>
           {/if}
           <button
             on:click={signOut}
@@ -233,14 +300,29 @@
           </div>
         </div>
       {:else if hasCards}
-        <div class="text-center mb-4">
+        <div class="flex justify-between items-center mb-4">
           <span class="text-gray-600 dark:text-gray-300">
             Card {currentCardIndex + 1} of {spreadsheetData.length}
           </span>
+          
+          <!-- Study Mode Toggle -->
+          <div class="flex items-center gap-3">
+            <span class="text-sm text-gray-600 dark:text-gray-300">Study Mode:</span>
+            <button
+              on:click={toggleStudyMode}
+              class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 {studyMode === 'word-to-definition' ? 'bg-blue-500' : 'bg-gray-400'}"
+            >
+              <span class="inline-block h-4 w-4 transform rounded-full bg-white transition-transform duration-200 {studyMode === 'word-to-definition' ? 'translate-x-6' : 'translate-x-1'}"></span>
+            </button>
+            <span class="text-sm text-gray-600 dark:text-gray-300 min-w-0">
+              {studyMode === 'word-to-definition' ? 'Word → Definition' : 'Definition → Word'}
+            </span>
+          </div>
         </div>
         
         <Flashcard
           {currentCard}
+          {studyMode}
           bind:showDefinition
           on:known={markKnown}
           on:unknown={markUnknown}
@@ -262,7 +344,7 @@
               No flashcards found
             </h3>
             <p class="text-gray-600 dark:text-gray-300 mb-4">
-              Make sure your spreadsheet has a "DeckData" sheet with "Word" and "Definition" columns.
+              Make sure your spreadsheet has a "mFlashcards" sheet with "Word" and "Definition" columns.
             </p>
             <button
               on:click={() => selectedSpreadsheetId = null}

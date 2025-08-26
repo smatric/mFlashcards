@@ -44,7 +44,7 @@ public/
 
 ### 2. Clone the Repo
 ```bash
-git clone https://github.com/YOUR-USERNAME/svelte-flashcards.git
+git clone https://github.com/smatric/mFlashcards.git
 cd svelte-flashcards
 npm install
 ```
@@ -96,7 +96,7 @@ For Netlify or Vercel:
 ## 📑 Google Sheets Structure
 You need **two sheets** in the same document:
 
-### `DeckData`
+### `mFlashcards`
 | Word       | Definition           |
 |------------|----------------------|
 | desist     | to stop              |

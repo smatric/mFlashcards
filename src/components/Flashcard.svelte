@@ -6,15 +6,11 @@
   const dispatch = createEventDispatcher();
   
   export let currentCard;
+  export let studyMode = 'word-to-definition';
   export let showDefinition = false;
   
-  let isFlipping = false;
-  
   function toggleCard() {
-    if (isFlipping) return;
-    isFlipping = true;
     showDefinition = !showDefinition;
-    setTimeout(() => isFlipping = false, 300);
   }
   
   function handleKnown() {
@@ -29,12 +25,8 @@
     dispatch('next');
   }
 
-  // Randomly decide whether to show word or definition first
-  let showWordFirst = Math.random() > 0.5;
-  
-  $: if (currentCard) {
-    showWordFirst = Math.random() > 0.5;
-  }
+  // Determine what to show based on study mode
+  $: showWordFirst = studyMode === 'word-to-definition';
 </script>
 
 {#if currentCard}
@@ -42,14 +34,14 @@
     <!-- Flashcard -->
     <div class="relative perspective-1000 mb-8">
       <div 
-        class="flashcard-container cursor-pointer transform-style-preserve-3d transition-transform duration-300 {isFlipping ? 'rotate-y-180' : ''}"
+        class="flashcard-container cursor-pointer transform-style-preserve-3d transition-transform duration-300 {showDefinition ? 'rotate-y-180' : ''}"
         on:click={toggleCard}
         on:keydown={(e) => e.key === ' ' && toggleCard()}
         role="button"
         tabindex="0"
       >
         <!-- Front of card -->
-        <div class="flashcard-face flashcard-front bg-white dark:bg-gray-800 shadow-xl rounded-xl p-8 min-h-[300px] flex items-center justify-center {showDefinition ? 'hidden' : ''}">
+        <div class="flashcard-face flashcard-front bg-white dark:bg-gray-800 shadow-xl rounded-xl p-8 min-h-[300px] flex items-center justify-center">
           <div class="text-center">
             <div class="text-sm text-gray-500 dark:text-gray-400 mb-2">
               {showWordFirst ? 'Word' : 'Definition'}
@@ -64,7 +56,7 @@
         </div>
         
         <!-- Back of card -->
-        <div class="flashcard-face flashcard-back bg-blue-50 dark:bg-blue-900 shadow-xl rounded-xl p-8 min-h-[300px] flex items-center justify-center {!showDefinition ? 'hidden' : ''}">
+        <div class="flashcard-face flashcard-back bg-blue-50 dark:bg-blue-900 shadow-xl rounded-xl p-8 min-h-[300px] flex items-center justify-center">
           <div class="text-center">
             <div class="text-sm text-gray-600 dark:text-gray-300 mb-2">
               {showWordFirst ? 'Definition' : 'Word'}
@@ -77,42 +69,31 @@
       </div>
     </div>
     
-    <!-- Action buttons (only show when definition is revealed) -->
-    {#if showDefinition}
-      <div class="flex gap-4 justify-center" transition:scale="{{ duration: 200, delay: 150 }}">
-        <button
-          on:click={handleUnknown}
-          class="bg-red-500 hover:bg-red-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200 flex items-center gap-2"
-        >
-          <span>❌</span>
-          Don't Know
-        </button>
-        
-        <button
-          on:click={handleNext}
-          class="bg-gray-500 hover:bg-gray-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200"
-        >
-          Skip
-        </button>
-        
-        <button
-          on:click={handleKnown}
-          class="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200 flex items-center gap-2"
-        >
-          <span>✅</span>
-          I Know This
-        </button>
-      </div>
-    {/if}
-    
-    <!-- Hint text -->
-    {#if !showDefinition}
-      <div class="text-center mt-6">
-        <p class="text-gray-500 dark:text-gray-400 text-sm">
-          Press <kbd class="px-2 py-1 bg-gray-200 dark:bg-gray-700 rounded text-xs">Space</kbd> or click the card to flip
-        </p>
-      </div>
-    {/if}
+    <!-- Action buttons (always visible) -->
+    <div class="flex gap-4 justify-center mt-6">
+      <button
+        on:click={handleUnknown}
+        class="bg-red-500 hover:bg-red-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200 flex items-center gap-2"
+      >
+        <span>❌</span>
+        Don't Know
+      </button>
+      
+      <button
+        on:click={toggleCard}
+        class="bg-gray-500 hover:bg-gray-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200"
+      >
+        Show Answer
+      </button>
+      
+      <button
+        on:click={handleKnown}
+        class="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200 flex items-center gap-2"
+      >
+        <span>✅</span>
+        I Know This
+      </button>
+    </div>
   </div>
 {/if}
 
