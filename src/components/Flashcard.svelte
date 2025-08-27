@@ -70,25 +70,18 @@
     </div>
     
     <!-- Action buttons (always visible) -->
-    <div class="flex gap-4 justify-center mt-6">
+    <div class="flex gap-6 justify-center mt-6">
       <button
         on:click={handleUnknown}
-        class="bg-red-500 hover:bg-red-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200 flex items-center gap-2"
+        class="bg-red-500 hover:bg-red-600 text-white font-medium px-8 py-3 rounded-lg transition-colors duration-200 flex items-center gap-2"
       >
         <span>❌</span>
         Don't Know
       </button>
       
       <button
-        on:click={toggleCard}
-        class="bg-gray-500 hover:bg-gray-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200"
-      >
-        Show Answer
-      </button>
-      
-      <button
         on:click={handleKnown}
-        class="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200 flex items-center gap-2"
+        class="bg-green-500 hover:bg-green-600 text-white font-medium px-8 py-3 rounded-lg transition-colors duration-200 flex items-center gap-2"
       >
         <span>✅</span>
         I Know This
