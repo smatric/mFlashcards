@@ -1,7 +1,7 @@
 {
   "name": "svelte-flashcards",
   "version": "1.0.0",
-  "description": "A Svelte flashcard app with Google Sheets integration",
+  "description": "A vibe-coded flashcard web app with Google Sheets integration",
   "private": true,
   "type": "module",
   "scripts": {

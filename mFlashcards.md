@@ -1,4 +1,4 @@
-# Svelte Flashcards Web App
+# mFlashcards Web App
 
 This is a Svelte-based flashcard web app that integrates with **Google Sheets API** and **Google Picker API**. It allows you to:
 - Authenticate with your Google account (OAuth2).

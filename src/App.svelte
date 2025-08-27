@@ -12,6 +12,7 @@
   let sessionStats = { total: 0, known: 0, unknown: 0 };
   let isLoading = false;
   let studyMode = 'word-to-definition'; // 'word-to-definition' or 'definition-to-word'
+  let deckCompleted = false;
 
   const DISCOVERY_DOC = 'https://sheets.googleapis.com/$discovery/rest?version=v4';
   const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
@@ -174,6 +175,7 @@
     currentCardIndex = 0;
     showDefinition = false;
     sessionStats = { total: 0, known: 0, unknown: 0 };
+    deckCompleted = false;
   }
 
   function toggleStudyMode() {
@@ -183,7 +185,12 @@
 
   function nextCard() {
     showDefinition = false;
-    currentCardIndex = (currentCardIndex + 1) % spreadsheetData.length;
+    currentCardIndex = currentCardIndex + 1;
+    
+    // Check if we've reached the end of the deck
+    if (currentCardIndex >= spreadsheetData.length) {
+      deckCompleted = true;
+    }
   }
 
   function markKnown() {
@@ -196,6 +203,11 @@
     sessionStats.total++;
     sessionStats.unknown++;
     nextCard();
+  }
+
+  function restartDeck() {
+    shuffleArray(spreadsheetData);
+    resetSession();
   }
 
   async function saveStats() {
@@ -228,11 +240,8 @@
   <div class="max-w-4xl mx-auto">
     <header class="text-center mb-8">
       <h1 class="text-4xl font-bold text-gray-800 dark:text-white mb-2">
-        📚 Svelte Flashcards
+        📚 mFlashcards
       </h1>
-      <p class="text-gray-600 dark:text-gray-300">
-        Learn with Google Sheets integration
-      </p>
     </header>
 
     {#if !isSignedIn}
@@ -299,7 +308,7 @@
             <p class="text-gray-600 dark:text-gray-300">Loading flashcards...</p>
           </div>
         </div>
-      {:else if hasCards}
+      {:else if hasCards && !deckCompleted}
         <div class="flex justify-between items-center mb-4">
           <span class="text-gray-600 dark:text-gray-300">
             Card {currentCardIndex + 1} of {spreadsheetData.length}
@@ -336,6 +345,79 @@
           >
             Choose Different Spreadsheet
           </button>
+        </div>
+      {:else if deckCompleted}
+        <!-- Deck Completion Screen -->
+        <div class="text-center">
+          <div class="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-8 max-w-md mx-auto">
+            <h2 class="text-3xl font-bold mb-4 text-gray-800 dark:text-white">
+              🎉 Deck Complete!
+            </h2>
+            <p class="text-gray-600 dark:text-gray-300 mb-6">
+              You've finished all {spreadsheetData.length} cards in this deck.
+            </p>
+            
+            <!-- Session Stats -->
+            <div class="bg-gray-50 dark:bg-gray-700 rounded-lg p-6 mb-6">
+              <h3 class="text-lg font-semibold mb-4 text-gray-800 dark:text-white">Session Stats</h3>
+              <div class="grid grid-cols-3 gap-4 text-center">
+                <div>
+                  <div class="text-2xl font-bold text-blue-600 dark:text-blue-400">{sessionStats.total}</div>
+                  <div class="text-sm text-gray-600 dark:text-gray-300">Total</div>
+                </div>
+                <div>
+                  <div class="text-2xl font-bold text-green-600 dark:text-green-400">{sessionStats.known}</div>
+                  <div class="text-sm text-gray-600 dark:text-gray-300">Known</div>
+                </div>
+                <div>
+                  <div class="text-2xl font-bold text-red-600 dark:text-red-400">{sessionStats.unknown}</div>
+                  <div class="text-sm text-gray-600 dark:text-gray-300">Unknown</div>
+                </div>
+              </div>
+              
+              {#if sessionStats.total > 0}
+                <div class="mt-4">
+                  <div class="text-sm text-gray-600 dark:text-gray-300 mb-2">
+                    Accuracy: {Math.round((sessionStats.known / sessionStats.total) * 100)}%
+                  </div>
+                  <div class="w-full bg-gray-200 dark:bg-gray-600 rounded-full h-2">
+                    <div 
+                      class="bg-green-500 h-2 rounded-full transition-all duration-300" 
+                      style="width: {(sessionStats.known / sessionStats.total) * 100}%"
+                    ></div>
+                  </div>
+                </div>
+              {/if}
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="flex gap-4 justify-center">
+              <button
+                on:click={restartDeck}
+                class="bg-blue-500 hover:bg-blue-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200"
+              >
+                🔄 Study Again
+              </button>
+              
+              {#if sessionStats.total > 0}
+                <button
+                  on:click={saveStats}
+                  class="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200"
+                >
+                  💾 Save Stats
+                </button>
+              {/if}
+            </div>
+            
+            <div class="mt-6">
+              <button
+                on:click={() => selectedSpreadsheetId = null}
+                class="text-blue-500 hover:text-blue-600 underline"
+              >
+                Choose Different Spreadsheet
+              </button>
+            </div>
+          </div>
         </div>
       {:else}
         <div class="text-center">
