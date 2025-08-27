@@ -240,7 +240,7 @@
   <div class="max-w-4xl mx-auto">
     <header class="text-center mb-8">
       <h1 class="text-4xl font-bold text-gray-800 dark:text-white mb-2">
-        📚 mFlashcards
+        mFlashcards
       </h1>
     </header>
 
