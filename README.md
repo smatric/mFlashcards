@@ -1,5 +1,7 @@
 # mFlashcards Web App
 
+Visit: [https://smatric.github.io/mFlashcards/](https://smatric.github.io/mFlashcards/) for the live demo.
+
 This is a vibe-coded, Svelte-based flashcard web app that integrates with **Google Sheets API** and **Google Picker API**. It allows you to:
 - Authenticate with your Google account (OAuth2).
 - Select a spreadsheet from Google Drive.

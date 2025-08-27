@@ -121,6 +121,27 @@
   // Determine what to show based on study mode
   $: showWordFirst = studyMode === 'word-to-definition';
   
+  // Text-to-Speech functionality
+  function playSound(text) {
+    if ('speechSynthesis' in window) {
+      // Cancel any ongoing speech
+      window.speechSynthesis.cancel();
+      
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 0.8; // Slightly slower for learning
+      utterance.volume = 0.7;
+      
+      // Try to use English voice
+      const voices = window.speechSynthesis.getVoices();
+      const englishVoice = voices.find(voice => voice.lang.startsWith('en'));
+      if (englishVoice) {
+        utterance.voice = englishVoice;
+      }
+      
+      window.speechSynthesis.speak(utterance);
+    }
+  }
+  
   // Calculate background tint based on swipe distance and direction
   $: swipeIntensity = Math.min(Math.abs(translateX) / 150, 0.3); // Max 30% opacity
   $: swipeDirection = translateX > 0 ? 'right' : 'left';
@@ -167,10 +188,29 @@
             <div class="text-sm text-gray-500 dark:text-gray-400 mb-2">
               {showWordFirst ? 'Word' : 'Definition'}
             </div>
-            <div class="text-2xl md:text-3xl font-semibold text-gray-800 dark:text-white break-words">
-              {showWordFirst ? currentCard.word : currentCard.definition}
+            <div class="flex items-center justify-center gap-3 mb-6">
+              <div class="text-2xl md:text-3xl font-semibold text-gray-800 dark:text-white break-words">
+                {showWordFirst ? currentCard.word : currentCard.definition}
+              </div>
+              <!-- Show sound icon when currently displaying a word -->
+              {#if 'speechSynthesis' in window && ((showWordFirst ? currentCard.word : currentCard.definition) === currentCard.word)}
+                <button
+                  on:click={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    playSound(currentCard.word);
+                  }}
+                  class="flex-shrink-0 p-2 rounded-full bg-blue-100 hover:bg-blue-200 dark:bg-blue-800 dark:hover:bg-blue-700 transition-colors duration-200 text-blue-600 dark:text-blue-300 relative z-50"
+                  title="Play pronunciation"
+                >
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                  </svg>
+                </button>
+              {/if}
             </div>
-            <div class="mt-6 text-sm text-gray-500 dark:text-gray-400">
+            <div class="text-sm text-gray-500 dark:text-gray-400">
               Click to reveal {showWordFirst ? 'definition' : 'word'}
             </div>
           </div>
@@ -184,12 +224,31 @@
             style="background-color: {backgroundTint}; pointer-events: none;"
           ></div>
           
-          <div class="text-center relative z-10">
+          <div class="text-center relative z-20">
             <div class="text-sm text-gray-600 dark:text-gray-300 mb-2">
               {showWordFirst ? 'Definition' : 'Word'}
             </div>
-            <div class="text-2xl md:text-3xl font-semibold text-blue-800 dark:text-blue-200 break-words">
-              {showWordFirst ? currentCard.definition : currentCard.word}
+            <div class="flex items-center justify-center gap-3">
+              <div class="text-2xl md:text-3xl font-semibold text-blue-800 dark:text-blue-200 break-words">
+                {showWordFirst ? currentCard.definition : currentCard.word}
+              </div>
+              <!-- Show sound icon when currently displaying a word -->
+              {#if 'speechSynthesis' in window && ((showWordFirst ? currentCard.definition : currentCard.word) === currentCard.word)}
+                <button
+                  on:click={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.stopImmediatePropagation();
+                    playSound(currentCard.word);
+                  }}
+                  class="flex-shrink-0 p-2 rounded-full bg-blue-200 hover:bg-blue-300 dark:bg-blue-700 dark:hover:bg-blue-600 transition-colors duration-200 text-blue-700 dark:text-blue-200 relative z-50"
+                  title="Play pronunciation"
+                >
+                  <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                  </svg>
+                </button>
+              {/if}
             </div>
           </div>
         </div>
@@ -246,7 +305,6 @@
     backface-visibility: hidden;
     border: 2px solid transparent;
     transition: border-color 0.2s;
-    pointer-events: none;
   }
   
   .flashcard-container:hover .flashcard-face {
@@ -257,12 +315,26 @@
     transform: rotateY(180deg);
   }
   
-  /* Allow pointer events on card content but prevent dragging */
-  .flashcard-face > * {
-    pointer-events: auto;
+  /* Z-index management for proper layering when flipped */
+  .flashcard-front {
+    z-index: 2;
   }
   
-  .transition-opacity {
-    transition: opacity 200ms ease-in-out;
+  .flashcard-back {
+    z-index: 1;
+  }
+  
+  /* When card is flipped, back face should be on top */
+  .rotate-y-180 .flashcard-front {
+    z-index: 1;
+  }
+  
+  .rotate-y-180 .flashcard-back {
+    z-index: 2;
+  }
+  
+  /* Allow pointer events on card content */
+  .flashcard-face > * {
+    pointer-events: auto;
   }
 </style>

@@ -16,7 +16,7 @@
   let deckCompleted = false;
 
   const DISCOVERY_DOC = 'https://sheets.googleapis.com/$discovery/rest?version=v4';
-  const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.profile';
+  const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.profile';
   
   let gis;
 
@@ -126,27 +126,45 @@
   }
 
   async function checkForExistingSpreadsheet() {
+    console.log('🔍 Checking for existing mFlashcards spreadsheet...');
     try {
+      // First check if we have the required API access
+      if (!window.gapi || !window.gapi.client) {
+        console.log('❌ GAPI client not available');
+        return;
+      }
+
       // Search for files named "mFlashcards" in Google Drive
+      console.log('📋 Searching Google Drive...');
       const response = await window.gapi.client.request({
         path: 'https://www.googleapis.com/drive/v3/files',
         params: {
           q: "name='mFlashcards' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
-          fields: 'files(id, name)',
+          fields: 'files(id, name, createdTime)',
         }
       });
+      
+      console.log('🔍 Drive API response:', response);
       
       if (response.result.files && response.result.files.length > 0) {
         // Found mFlashcards file, load it automatically
         const file = response.result.files[0];
-        console.log('Found existing mFlashcards file:', file);
+        console.log('✅ Found existing mFlashcards file:', file);
         selectedSpreadsheetId = file.id;
         await loadSpreadsheetData();
       } else {
-        console.log('No existing mFlashcards file found');
+        console.log('❌ No existing mFlashcards file found in Google Drive');
+        console.log('💡 You can create one or select an existing spreadsheet');
       }
     } catch (error) {
-      console.error('Error checking for existing spreadsheet:', error);
+      console.error('❌ Error checking for existing spreadsheet:', error);
+      console.log('Response status:', error.status);
+      console.log('Response body:', error.body);
+      
+      // Try alternative approach - check if it's a permission issue
+      if (error.status === 403) {
+        console.log('🔐 Permission denied - make sure Drive API is enabled and scopes are correct');
+      }
       // Continue normally - user can still select manually
     }
   }
