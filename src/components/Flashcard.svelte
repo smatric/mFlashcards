@@ -125,9 +125,4 @@
   .flashcard-back {
     transform: rotateY(180deg);
   }
-  
-  kbd {
-    font-family: monospace;
-    font-size: 0.875rem;
-  }
 </style>
