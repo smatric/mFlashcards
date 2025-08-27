@@ -15,6 +15,9 @@
   let currentX = 0;
   let translateX = 0;
   let isAnimating = false;
+  let cardOpacity = 1;
+  let shouldTransition = true;
+  let hasMoved = false;
   
   function toggleCard() {
     showDefinition = !showDefinition;
@@ -36,6 +39,7 @@
   function handleStart(e) {
     if (isAnimating) return;
     isDragging = true;
+    hasMoved = false;
     startX = e.type === 'mousedown' ? e.clientX : e.touches[0].clientX;
     currentX = startX;
     translateX = 0;
@@ -47,78 +51,99 @@
     currentX = e.type === 'mousemove' ? e.clientX : e.touches[0].clientX;
     translateX = currentX - startX;
     
+    // Mark as moved if moved more than a few pixels
+    if (Math.abs(translateX) > 5) {
+      hasMoved = true;
+    }
+    
     // Limit the drag distance
     translateX = Math.max(-200, Math.min(200, translateX));
   }
 
-  function handleEnd() {
+  function handleEnd(e) {
     if (!isDragging || isAnimating) return;
     isDragging = false;
-    isAnimating = true;
     
     const threshold = 80;
     
     if (translateX > threshold) {
       // Swipe right - "I Know This"
-      translateX = 300;
-      setTimeout(() => {
-        handleKnown();
-        resetCard();
-      }, 200);
+      if (e) e.preventDefault(); // Prevent click event
+      isAnimating = true;
+      animateCardOut(() => handleKnown());
     } else if (translateX < -threshold) {
       // Swipe left - "Don't Know"
-      translateX = -300;
-      setTimeout(() => {
-        handleUnknown();
-        resetCard();
-      }, 200);
-    } else {
-      // Snap back to center
+      if (e) e.preventDefault(); // Prevent click event
+      isAnimating = true;
+      animateCardOut(() => handleUnknown());
+    } else if (hasMoved) {
+      // Small movement but not a swipe - prevent click
+      if (e) e.preventDefault();
+      isAnimating = true;
       translateX = 0;
       setTimeout(() => {
         isAnimating = false;
       }, 200);
+    } else {
+      // No significant movement - allow click to proceed
+      isAnimating = false;
     }
   }
 
-  function resetCard() {
-    translateX = 0;
-    isAnimating = false;
+  function animateCardOut(callback) {
+    // Slide card out further in the swipe direction
+    translateX = translateX > 0 ? 400 : -400;
+    
+    setTimeout(() => {
+      // Trigger the action (which will change the card)
+      callback();
+      
+      // Disable transitions and reset position immediately
+      shouldTransition = false;
+      cardOpacity = 0;
+      translateX = 0;
+      
+      // Wait 200ms then fade in the new card
+      setTimeout(() => {
+        shouldTransition = true;
+        cardOpacity = 1;
+        isAnimating = false;
+        hasMoved = false;
+      }, 200);
+    }, 200);
+  }
+
+  // React to card changes and reset showDefinition for new card
+  $: if (currentCard && !isAnimating) {
+    showDefinition = false;
   }
 
   // Determine what to show based on study mode
   $: showWordFirst = studyMode === 'word-to-definition';
   
-  // Calculate opacity based on swipe distance
-  $: swipeOpacity = Math.abs(translateX) / 200;
+  // Calculate background tint based on swipe distance and direction
+  $: swipeIntensity = Math.min(Math.abs(translateX) / 150, 0.3); // Max 30% opacity
   $: swipeDirection = translateX > 0 ? 'right' : 'left';
+  $: backgroundTint = isDragging && Math.abs(translateX) > 20 ? 
+    (swipeDirection === 'right' ? `rgba(34, 197, 94, ${swipeIntensity})` : `rgba(239, 68, 68, ${swipeIntensity})`) : 
+    'transparent';
 </script>
 
 {#if currentCard}
   <div class="max-w-2xl mx-auto">
     <!-- Flashcard -->
     <div class="relative perspective-1000 mb-8">
-      <!-- Swipe indicators -->
-      {#if isDragging && Math.abs(translateX) > 20}
-        <div class="absolute top-1/2 left-4 transform -translate-y-1/2 z-20 pointer-events-none transition-opacity duration-200" 
-             style="opacity: {swipeDirection === 'left' ? swipeOpacity : 0}">
-          <div class="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-medium">
-            Don't Know
-          </div>
-        </div>
-        <div class="absolute top-1/2 right-4 transform -translate-y-1/2 z-20 pointer-events-none transition-opacity duration-200"
-             style="opacity: {swipeDirection === 'right' ? swipeOpacity : 0}">
-          <div class="bg-green-500 text-white px-3 py-1 rounded-full text-sm font-medium">
-            I Know This
-          </div>
-        </div>
-      {/if}
       
       <div 
         bind:this={cardElement}
-        class="flashcard-container cursor-pointer transform-style-preserve-3d transition-all duration-300 {showDefinition ? 'rotate-y-180' : ''} {isAnimating ? 'transition-transform' : ''}"
-        style="transform: translateX({translateX}px) {showDefinition ? 'rotateY(180deg)' : ''}"
-        on:click={toggleCard}
+        class="flashcard-container cursor-pointer transform-style-preserve-3d {shouldTransition ? 'transition-all duration-200' : ''} {showDefinition ? 'rotate-y-180' : ''}"
+        style="transform: translateX({translateX}px) {showDefinition ? 'rotateY(180deg)' : ''}; opacity: {cardOpacity}"
+        on:click={(e) => {
+          // Only allow flip if we haven't moved during this interaction
+          if (!isAnimating) {
+            toggleCard();
+          }
+        }}
         on:keydown={(e) => e.key === ' ' && toggleCard()}
         on:mousedown={handleStart}
         on:mousemove={handleMove}
@@ -131,8 +156,14 @@
         tabindex="0"
       >
         <!-- Front of card -->
-        <div class="flashcard-face flashcard-front bg-white dark:bg-gray-800 shadow-xl rounded-xl p-8 min-h-[300px] flex items-center justify-center">
-          <div class="text-center">
+        <div class="flashcard-face flashcard-front bg-white dark:bg-gray-800 shadow-xl rounded-xl p-8 min-h-[300px] flex items-center justify-center relative">
+          <!-- Background tint overlay -->
+          <div 
+            class="absolute inset-0 rounded-xl transition-all duration-75 ease-out"
+            style="background-color: {backgroundTint}; pointer-events: none;"
+          ></div>
+          
+          <div class="text-center relative z-10">
             <div class="text-sm text-gray-500 dark:text-gray-400 mb-2">
               {showWordFirst ? 'Word' : 'Definition'}
             </div>
@@ -146,8 +177,14 @@
         </div>
         
         <!-- Back of card -->
-        <div class="flashcard-face flashcard-back bg-blue-50 dark:bg-blue-900 shadow-xl rounded-xl p-8 min-h-[300px] flex items-center justify-center">
-          <div class="text-center">
+        <div class="flashcard-face flashcard-back bg-blue-50 dark:bg-blue-900 shadow-xl rounded-xl p-8 min-h-[300px] flex items-center justify-center relative">
+          <!-- Background tint overlay -->
+          <div 
+            class="absolute inset-0 rounded-xl transition-all duration-75 ease-out"
+            style="background-color: {backgroundTint}; pointer-events: none;"
+          ></div>
+          
+          <div class="text-center relative z-10">
             <div class="text-sm text-gray-600 dark:text-gray-300 mb-2">
               {showWordFirst ? 'Definition' : 'Word'}
             </div>
@@ -223,5 +260,9 @@
   /* Allow pointer events on card content but prevent dragging */
   .flashcard-face > * {
     pointer-events: auto;
+  }
+  
+  .transition-opacity {
+    transition: opacity 200ms ease-in-out;
   }
 </style>

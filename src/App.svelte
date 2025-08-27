@@ -42,6 +42,9 @@
         } else {
           await getUserProfile();
         }
+        
+        // Check for existing mFlashcards file
+        await checkForExistingSpreadsheet();
       }
     }
   });
@@ -80,6 +83,7 @@
           window.gapi.client.setToken({ access_token: accessToken });
           isSignedIn = true;
           await getUserProfile();
+          await checkForExistingSpreadsheet();
         }
       },
     });
@@ -119,6 +123,32 @@
     selectedSpreadsheetId = null;
     spreadsheetData = [];
     resetSession();
+  }
+
+  async function checkForExistingSpreadsheet() {
+    try {
+      // Search for files named "mFlashcards" in Google Drive
+      const response = await window.gapi.client.request({
+        path: 'https://www.googleapis.com/drive/v3/files',
+        params: {
+          q: "name='mFlashcards' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+          fields: 'files(id, name)',
+        }
+      });
+      
+      if (response.result.files && response.result.files.length > 0) {
+        // Found mFlashcards file, load it automatically
+        const file = response.result.files[0];
+        console.log('Found existing mFlashcards file:', file);
+        selectedSpreadsheetId = file.id;
+        await loadSpreadsheetData();
+      } else {
+        console.log('No existing mFlashcards file found');
+      }
+    } catch (error) {
+      console.error('Error checking for existing spreadsheet:', error);
+      // Continue normally - user can still select manually
+    }
   }
 
   async function onSpreadsheetSelected(event) {
