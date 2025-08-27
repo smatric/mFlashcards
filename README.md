@@ -27,6 +27,8 @@ npm run build
 ---
 
 ## 📑 Google Sheets Structure
+Be default "mFlashcards" spreadsheet is loaded. If not found, the app will prompt you to select a spreadsheet.
+
 You need **two sheets** in the same document:
 
 ### `mFlashcards`

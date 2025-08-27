@@ -103,13 +103,13 @@
       cardOpacity = 0;
       translateX = 0;
       
-      // Wait 200ms then fade in the new card
+      // Wait 100ms then fade in the new card
       setTimeout(() => {
         shouldTransition = true;
         cardOpacity = 1;
         isAnimating = false;
         hasMoved = false;
-      }, 200);
+      }, 100);
     }, 200);
   }
 
@@ -261,14 +261,14 @@
         on:click={handleUnknown}
         class="bg-red-500 hover:bg-red-600 text-white font-medium px-8 py-3 rounded-lg transition-colors duration-200"
       >
-        Don't Know
+        Hard
       </button>
       
       <button
         on:click={handleKnown}
         class="bg-green-500 hover:bg-green-600 text-white font-medium px-8 py-3 rounded-lg transition-colors duration-200"
       >
-        I Know This
+        Easy
       </button>
     </div>
   </div>

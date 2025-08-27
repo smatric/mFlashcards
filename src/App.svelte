@@ -251,6 +251,7 @@
   }
 
   function resetSession() {
+    shuffleArray(spreadsheetData);
     currentCardIndex = 0;
     showDefinition = false;
     sessionStats = { total: 0, known: 0, unknown: 0 };
