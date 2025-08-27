@@ -1,0 +1,26 @@
+{
+  "name": "mFlashcards",
+  "short_name": "mFlashcards",
+  "description": "A flashcard web app with Google Sheets integration",
+  "start_url": "/mFlashcards/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3b82f6",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/mFlashcards/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable any"
+    },
+    {
+      "src": "/mFlashcards/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable any"
+    }
+  ],
+  "categories": ["education", "productivity"],
+  "lang": "en-US"
+}
