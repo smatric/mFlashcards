@@ -5,6 +5,7 @@
 
   let isSignedIn = false;
   let accessToken = null;
+  let userProfile = null;
   let selectedSpreadsheetId = null;
   let spreadsheetData = [];
   let currentCardIndex = 0;
@@ -15,7 +16,7 @@
   let deckCompleted = false;
 
   const DISCOVERY_DOC = 'https://sheets.googleapis.com/$discovery/rest?version=v4';
-  const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets';
+  const SCOPES = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.profile';
   
   let gis;
 
@@ -26,10 +27,21 @@
       await initializeGis();
       
       const savedToken = localStorage.getItem('google_access_token');
+      const savedProfile = localStorage.getItem('user_profile');
       if (savedToken) {
         accessToken = savedToken;
         window.gapi.client.setToken({ access_token: accessToken });
         isSignedIn = true;
+        if (savedProfile) {
+          try {
+            userProfile = JSON.parse(savedProfile);
+          } catch (error) {
+            console.error('Error parsing saved profile:', error);
+            await getUserProfile();
+          }
+        } else {
+          await getUserProfile();
+        }
       }
     }
   });
@@ -61,12 +73,13 @@
     gis = google.accounts.oauth2.initTokenClient({
       client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
       scope: SCOPES,
-      callback: (response) => {
+      callback: async (response) => {
         if (response.access_token) {
           accessToken = response.access_token;
           localStorage.setItem('google_access_token', accessToken);
           window.gapi.client.setToken({ access_token: accessToken });
           isSignedIn = true;
+          await getUserProfile();
         }
       },
     });
@@ -78,13 +91,31 @@
     }
   }
 
+  async function getUserProfile() {
+    try {
+      const response = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      if (response.ok) {
+        userProfile = await response.json();
+        localStorage.setItem('user_profile', JSON.stringify(userProfile));
+      }
+    } catch (error) {
+      console.error('Error fetching user profile:', error);
+    }
+  }
+
   function signOut() {
     if (accessToken) {
       google.accounts.oauth2.revoke(accessToken);
       localStorage.removeItem('google_access_token');
+      localStorage.removeItem('user_profile');
     }
     isSignedIn = false;
     accessToken = null;
+    userProfile = null;
     selectedSpreadsheetId = null;
     spreadsheetData = [];
     resetSession();
@@ -262,42 +293,21 @@
         </div>
       </div>
     {:else}
-      <div class="flex justify-between items-center mb-6">
-        <div class="flex items-center gap-4">
-          <span class="text-gray-600 dark:text-gray-300">
-            Signed in ✅
-          </span>
-          {#if sessionStats.total > 0}
-            <div class="bg-white dark:bg-gray-800 px-4 py-2 rounded-lg shadow">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Session: {sessionStats.known}✅ {sessionStats.unknown}❌ / {sessionStats.total}
-              </span>
-            </div>
-          {/if}
-        </div>
-        <div class="flex gap-2">
-          {#if sessionStats.total > 0}
-            <button
-              on:click={saveStats}
-              class="bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-lg transition-colors duration-200"
-            >
-              Save Stats
-            </button>
+      {#if sessionStats.total > 0}
+        <div class="flex justify-center mb-6">
+          <div class="bg-white dark:bg-gray-800 px-4 py-2 rounded-lg shadow">
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+              {sessionStats.known} ✅ {sessionStats.unknown} ❌ / {sessionStats.total}
+            </span>
             <button
               on:click={resetSession}
-              class="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg transition-colors duration-200"
+              class="ml-4 bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded text-sm transition-colors duration-200"
             >
-              Reset Stats
+              Reset Deck
             </button>
-          {/if}
-          <button
-            on:click={signOut}
-            class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors duration-200"
-          >
-            Sign Out
-          </button>
+          </div>
         </div>
-      </div>
+      {/if}
 
       {#if !selectedSpreadsheetId}
         <Picker on:selected={onSpreadsheetSelected} />
@@ -316,7 +326,7 @@
           
           <!-- Study Mode Toggle -->
           <div class="flex items-center gap-3">
-            <span class="text-sm text-gray-600 dark:text-gray-300">Study Mode:</span>
+            <span class="text-sm text-gray-600 dark:text-gray-300 hidden sm:inline">Study Mode:</span>
             <button
               on:click={toggleStudyMode}
               class="relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 {studyMode === 'word-to-definition' ? 'bg-blue-500' : 'bg-gray-400'}"
@@ -345,6 +355,21 @@
           >
             Choose Different Spreadsheet
           </button>
+        </div>
+        
+        <!-- Bottom status -->
+        <div class="text-center mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div class="flex justify-center items-center gap-4">
+            <span class="text-gray-600 dark:text-gray-300 text-sm">
+{userProfile ? `Signed in as ${userProfile.name}` : 'Signed in'}
+            </span>
+            <button
+              on:click={signOut}
+              class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 text-sm"
+            >
+              Sign Out
+            </button>
+          </div>
         </div>
       {:else if deckCompleted}
         <!-- Deck Completion Screen -->
@@ -391,22 +416,13 @@
             </div>
             
             <!-- Action Buttons -->
-            <div class="flex gap-4 justify-center">
+            <div class="flex justify-center">
               <button
                 on:click={restartDeck}
                 class="bg-blue-500 hover:bg-blue-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200"
               >
                 🔄 Study Again
               </button>
-              
-              {#if sessionStats.total > 0}
-                <button
-                  on:click={saveStats}
-                  class="bg-green-500 hover:bg-green-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200"
-                >
-                  💾 Save Stats
-                </button>
-              {/if}
             </div>
             
             <div class="mt-6">
@@ -415,6 +431,21 @@
                 class="text-blue-500 hover:text-blue-600 underline"
               >
                 Choose Different Spreadsheet
+              </button>
+            </div>
+          </div>
+          
+          <!-- Bottom status -->
+          <div class="text-center mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <div class="flex justify-center items-center gap-4">
+              <span class="text-gray-600 dark:text-gray-300 text-sm">
+  {userProfile ? `Signed in as ${userProfile.name}` : 'Signed in'}
+              </span>
+              <button
+                on:click={signOut}
+                class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 text-sm"
+              >
+                Sign Out
               </button>
             </div>
           </div>
@@ -433,6 +464,38 @@
               class="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors duration-200"
             >
               Choose Different Spreadsheet
+            </button>
+          </div>
+          
+          <!-- Bottom status -->
+          <div class="text-center mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
+            <div class="flex justify-center items-center gap-4">
+              <span class="text-gray-600 dark:text-gray-300 text-sm">
+  {userProfile ? `Signed in as ${userProfile.name}` : 'Signed in'}
+              </span>
+              <button
+                on:click={signOut}
+                class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 text-sm"
+              >
+                Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      {/if}
+      
+      <!-- Bottom status for picker and loading screens -->
+      {#if !hasCards || isLoading}
+        <div class="text-center mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
+          <div class="flex justify-center items-center gap-4">
+            <span class="text-gray-600 dark:text-gray-300 text-sm">
+{userProfile ? `Signed in as ${userProfile.name}` : 'Signed in'}
+            </span>
+            <button
+              on:click={signOut}
+              class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 text-sm"
+            >
+              Sign Out
             </button>
           </div>
         </div>
