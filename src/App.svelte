@@ -6,6 +6,7 @@
   let isSignedIn = false;
   let accessToken = null;
   let userProfile = null;
+  let tokenExpirationTime = null;
   let selectedSpreadsheetId = null;
   let spreadsheetData = [];
   let currentCardIndex = 0;
@@ -19,32 +20,127 @@
   const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.profile';
   
   let gis;
+  let tokenRefreshInterval;
+
+  function setupChunkLoadingErrorBoundary() {
+    let lastReloadTime = 0;
+    const BASE_DELAY = 2000; // 2 seconds base delay
+
+    // Reset reload time on successful navigation
+    window.addEventListener('load', () => {
+      lastReloadTime = 0;
+    });
+
+    // Handle asset loading errors (JS/CSS 404s)
+    window.addEventListener('error', (event) => {
+      const target = event.target || event.srcElement;
+      const isAssetError = target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK');
+      
+      if (isAssetError) {
+        const src = target.src || target.href || '';
+        const isHashedAsset = /\-[a-zA-Z0-9]{8,}\.(js|css)/.test(src);
+        
+        if (isHashedAsset) {
+          console.warn('Asset loading failed (likely due to deployment):', src);
+          reloadWithBackoff();
+        }
+      }
+      
+      // Also check for runtime chunk loading errors
+      const error = event.error || {};
+      const message = event.message || error.message || '';
+      
+      const isChunkLoadingError = 
+        message.includes('Loading chunk') ||
+        message.includes('Loading CSS chunk') ||
+        message.includes('ChunkLoadError') ||
+        message.includes('Failed to import');
+
+      if (isChunkLoadingError) {
+        console.warn('Chunk loading error detected:', message);
+        reloadWithBackoff();
+      }
+    });
+
+    // Handle unhandled promise rejections that might be chunk-related
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event.reason || {};
+      const message = reason.message || reason.toString() || '';
+      
+      if (message.includes('Loading chunk') || 
+          message.includes('ChunkLoadError') ||
+          message.includes('Failed to import') ||
+          message.includes('404')) {
+        console.warn('Unhandled chunk loading rejection:', message);
+        reloadWithBackoff();
+      }
+    });
+
+    function reloadWithBackoff() {
+      const now = Date.now();
+      const timeSinceLastReload = now - lastReloadTime;
+      
+      // Calculate delay with exponential back-off
+      const reloadCount = lastReloadTime === 0 ? 0 : Math.floor(timeSinceLastReload / BASE_DELAY) + 1;
+      const delay = BASE_DELAY * Math.pow(2, Math.min(reloadCount, 5)); // Cap at 64s max delay
+      
+      if (timeSinceLastReload >= delay || lastReloadTime === 0) {
+        lastReloadTime = now;
+        
+        console.log(`Reloading page due to asset loading error (delay: ${delay}ms)`);
+        
+        setTimeout(() => {
+          window.location.reload();
+        }, delay);
+      }
+    }
+  }
 
   onMount(async () => {
     if (typeof window !== 'undefined') {
+      // Initialize chunk loading error boundary with exponential back-off
+      setupChunkLoadingErrorBoundary();
+      
       await waitForGoogleAPIs();
       await initializeGapi();
       await initializeGis();
       
       const savedToken = localStorage.getItem('google_access_token');
+      const savedTokenExpiration = localStorage.getItem('google_token_expiration');
       const savedProfile = localStorage.getItem('user_profile');
-      if (savedToken) {
-        accessToken = savedToken;
-        window.gapi.client.setToken({ access_token: accessToken });
-        isSignedIn = true;
-        if (savedProfile) {
-          try {
-            userProfile = JSON.parse(savedProfile);
-          } catch (error) {
-            console.error('Error parsing saved profile:', error);
+      
+      if (savedToken && savedTokenExpiration) {
+        const expirationTime = parseInt(savedTokenExpiration);
+        const now = Date.now();
+        
+        // Check if token is still valid (with 5 minute buffer)
+        if (now < expirationTime - 5 * 60 * 1000) {
+          accessToken = savedToken;
+          tokenExpirationTime = expirationTime;
+          window.gapi.client.setToken({ access_token: accessToken });
+          isSignedIn = true;
+          
+          if (savedProfile) {
+            try {
+              userProfile = JSON.parse(savedProfile);
+            } catch (error) {
+              console.error('Error parsing saved profile:', error);
+              await getUserProfile();
+            }
+          } else {
             await getUserProfile();
           }
+          
+          // Set up periodic token refresh check
+          startTokenRefreshTimer();
+          
+          // Check for existing mFlashcards file
+          await checkForExistingSpreadsheet();
         } else {
-          await getUserProfile();
+          // Token expired, clear it
+          console.log('Stored token has expired, clearing...');
+          clearAuthData();
         }
-        
-        // Check for existing mFlashcards file
-        await checkForExistingSpreadsheet();
       }
     }
   });
@@ -79,9 +175,15 @@
       callback: async (response) => {
         if (response.access_token) {
           accessToken = response.access_token;
+          
+          // Calculate expiration time (tokens typically last 1 hour)
+          tokenExpirationTime = Date.now() + (response.expires_in ? response.expires_in * 1000 : 3600 * 1000);
+          
           localStorage.setItem('google_access_token', accessToken);
+          localStorage.setItem('google_token_expiration', tokenExpirationTime.toString());
           window.gapi.client.setToken({ access_token: accessToken });
           isSignedIn = true;
+          startTokenRefreshTimer();
           await getUserProfile();
           await checkForExistingSpreadsheet();
         }
@@ -105,28 +207,110 @@
       if (response.ok) {
         userProfile = await response.json();
         localStorage.setItem('user_profile', JSON.stringify(userProfile));
+      } else if (response.status === 401 || response.status === 403) {
+        // Handle auth error
+        const error = { status: response.status };
+        await handleAuthError(error);
       }
     } catch (error) {
       console.error('Error fetching user profile:', error);
     }
   }
 
-  function signOut() {
-    if (accessToken) {
-      google.accounts.oauth2.revoke(accessToken);
-      localStorage.removeItem('google_access_token');
-      localStorage.removeItem('user_profile');
+  function clearAuthData() {
+    if (tokenRefreshInterval) {
+      clearInterval(tokenRefreshInterval);
+      tokenRefreshInterval = null;
     }
+    localStorage.removeItem('google_access_token');
+    localStorage.removeItem('google_token_expiration');
+    localStorage.removeItem('user_profile');
     isSignedIn = false;
     accessToken = null;
+    tokenExpirationTime = null;
     userProfile = null;
     selectedSpreadsheetId = null;
     spreadsheetData = [];
     resetSession();
   }
 
+  function startTokenRefreshTimer() {
+    // Check token every 5 minutes
+    if (tokenRefreshInterval) {
+      clearInterval(tokenRefreshInterval);
+    }
+    
+    tokenRefreshInterval = setInterval(() => {
+      if (isSignedIn && accessToken) {
+        refreshTokenIfNeeded();
+      }
+    }, 5 * 60 * 1000); // Check every 5 minutes
+  }
+
+  function signOut() {
+    if (accessToken) {
+      google.accounts.oauth2.revoke(accessToken);
+    }
+    clearAuthData();
+  }
+
+  async function refreshTokenIfNeeded() {
+    if (!accessToken || !tokenExpirationTime) {
+      return false;
+    }
+    
+    const now = Date.now();
+    const timeUntilExpiry = tokenExpirationTime - now;
+    
+    // If token expires in less than 5 minutes, refresh it
+    if (timeUntilExpiry < 5 * 60 * 1000) {
+      console.log('Token expiring soon, requesting refresh...');
+      try {
+        // Request a new token silently
+        if (gis) {
+          gis.requestAccessToken({ prompt: '' });
+          return true;
+        }
+      } catch (error) {
+        console.error('Failed to refresh token:', error);
+        return false;
+      }
+    }
+    
+    return true;
+  }
+
+  async function handleAuthError(error) {
+    console.error('Authentication error:', error);
+    
+    // Check if it's an auth-related error
+    if (error.status === 401 || error.status === 403) {
+      console.log('Authentication failed, attempting to refresh token...');
+      
+      // Try to refresh the token first
+      const refreshed = await refreshTokenIfNeeded();
+      if (!refreshed) {
+        console.log('Token refresh failed, signing out...');
+        clearAuthData();
+        alert('Your session has expired. Please sign in again.');
+        return false;
+      }
+      return true;
+    }
+    
+    return false;
+  }
+
   async function checkForExistingSpreadsheet() {
     console.log('🔍 Checking for existing mFlashcards spreadsheet...');
+    
+    // Check token validity before making API call
+    const tokenValid = await refreshTokenIfNeeded();
+    if (!tokenValid) {
+      console.log('❌ Token invalid and refresh failed');
+      return;
+    }
+    
     try {
       // First check if we have the required API access
       if (!window.gapi || !window.gapi.client) {
@@ -161,6 +345,14 @@
       console.log('Response status:', error.status);
       console.log('Response body:', error.body);
       
+      // Handle authentication errors
+      const authHandled = await handleAuthError(error);
+      if (authHandled) {
+        // Retry the operation
+        setTimeout(() => checkForExistingSpreadsheet(), 1000);
+        return;
+      }
+      
       // Try alternative approach - check if it's a permission issue
       if (error.status === 403) {
         console.log('🔐 Permission denied - make sure Drive API is enabled and scopes are correct');
@@ -176,6 +368,13 @@
 
   async function loadSpreadsheetData() {
     if (!selectedSpreadsheetId) return;
+    
+    // Check token validity before making API call
+    const tokenValid = await refreshTokenIfNeeded();
+    if (!tokenValid) {
+      console.log('❌ Token invalid and refresh failed');
+      return;
+    }
     
     isLoading = true;
     try {
@@ -225,6 +424,15 @@
       
     } catch (error) {
       console.error('Error loading spreadsheet data:', error);
+      
+      // Handle authentication errors
+      const authHandled = await handleAuthError(error);
+      if (authHandled) {
+        // Retry the operation
+        setTimeout(() => loadSpreadsheetData(), 1000);
+        return;
+      }
+      
       let errorMessage = 'Error loading spreadsheet data: ';
       
       if (error.status === 403) {
@@ -293,6 +501,14 @@
   async function saveStats() {
     if (!selectedSpreadsheetId || sessionStats.total === 0) return;
     
+    // Check token validity before making API call
+    const tokenValid = await refreshTokenIfNeeded();
+    if (!tokenValid) {
+      console.log('❌ Token invalid and refresh failed');
+      alert('Your session has expired. Please sign in again.');
+      return;
+    }
+    
     try {
       const today = new Date().toISOString().split('T')[0];
       const values = [[today, sessionStats.total, sessionStats.known, sessionStats.unknown]];
@@ -308,6 +524,15 @@
       resetSession();
     } catch (error) {
       console.error('Error saving stats:', error);
+      
+      // Handle authentication errors
+      const authHandled = await handleAuthError(error);
+      if (authHandled) {
+        // Retry the operation
+        setTimeout(() => saveStats(), 1000);
+        return;
+      }
+      
       alert('Error saving stats. Make sure you have a "StatsData" sheet with Date, Total, Known, Unknown columns.');
     }
   }
@@ -339,18 +564,31 @@
           >
             Sign in with Google
           </button>
+          <div class="mt-4 space-x-4">
+            <a href="/privacy-policy.html" class="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline">Privacy Policy</a>
+            <a href="/terms-of-service.html" class="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline">Terms of Service</a>
+          </div>
         </div>
       </div>
     {:else}
       {#if sessionStats.total > 0}
         <div class="flex justify-center mb-6">
-          <div class="bg-white dark:bg-gray-800 px-4 py-2 rounded-lg shadow">
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
-              {sessionStats.known} ✅ {sessionStats.unknown} ❌ / {sessionStats.total}
-            </span>
+          <div class="flex items-center gap-4">
+            <!-- Split-pill stats display -->
+            <div class="flex rounded-full overflow-hidden shadow-lg">
+              <div class="bg-green-500 text-white px-4 py-2 font-medium text-sm flex items-center">
+                <span class="mr-1">Easy</span>
+                <span class="bg-green-600 rounded-full px-2 py-0.5 text-xs font-bold">{sessionStats.known}</span>
+              </div>
+              <div class="bg-red-500 text-white px-4 py-2 font-medium text-sm flex items-center">
+                <span class="mr-1">Hard</span>
+                <span class="bg-red-600 rounded-full px-2 py-0.5 text-xs font-bold">{sessionStats.unknown}</span>
+              </div>
+            </div>
+            
             <button
               on:click={resetSession}
-              class="ml-4 bg-orange-500 hover:bg-orange-600 text-white px-3 py-1 rounded text-sm transition-colors duration-200"
+              class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded-lg text-sm transition-colors duration-200 font-medium"
             >
               Reset Deck
             </button>
@@ -418,6 +656,9 @@
             >
               Sign Out
             </button>
+          </div>
+          <div class="mt-2">
+            <a href="/privacy-policy.html" class="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline">Privacy Policy</a>
           </div>
         </div>
       {:else if deckCompleted}
@@ -546,6 +787,9 @@
             >
               Sign Out
             </button>
+          </div>
+          <div class="mt-2">
+            <a href="/privacy-policy.html" class="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline">Privacy Policy</a>
           </div>
         </div>
       {/if}

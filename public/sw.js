@@ -1,8 +1,8 @@
 const CACHE_NAME = 'mflashcards-v1';
 const urlsToCache = [
-  '/mFlashcards/',
-  '/mFlashcards/index.html',
-  '/mFlashcards/manifest.json'
+  '/',
+  '/index.html',
+  '/manifest.json'
 ];
 
 self.addEventListener('install', (event) => {

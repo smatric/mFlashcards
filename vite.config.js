@@ -6,7 +6,7 @@ export default defineConfig({
   define: {
     global: 'globalThis',
   },
-  base: '/mFlashcards/',
+  base: '/',
   server: {
     host: true,
     port: 3000,

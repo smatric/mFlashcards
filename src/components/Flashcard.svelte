@@ -1,5 +1,5 @@
 <script>
-  import { createEventDispatcher } from 'svelte';
+  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { flip } from 'svelte/animate';
   import { scale } from 'svelte/transition';
   
@@ -34,6 +34,7 @@
   function handleNext() {
     dispatch('next');
   }
+
 
   // Touch/Mouse event handlers for swiping
   function handleStart(e) {
@@ -127,18 +128,50 @@
       // Cancel any ongoing speech
       window.speechSynthesis.cancel();
       
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 0.8; // Slightly slower for learning
-      utterance.volume = 0.7;
-      
-      // Try to use English voice
-      const voices = window.speechSynthesis.getVoices();
-      const englishVoice = voices.find(voice => voice.lang.startsWith('en'));
-      if (englishVoice) {
-        utterance.voice = englishVoice;
-      }
-      
-      window.speechSynthesis.speak(utterance);
+      // Android fix: Small delay to ensure cancellation completes
+      setTimeout(() => {
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.rate = 0.8; // Slightly slower for learning
+        utterance.volume = 0.7;
+        utterance.lang = 'en-US'; // Explicitly set language for Android
+        
+        // Android fix: Handle voice selection more robustly
+        const setVoiceAndSpeak = () => {
+          const voices = window.speechSynthesis.getVoices();
+          if (voices.length > 0) {
+            const englishVoice = voices.find(voice => 
+              voice.lang.startsWith('en') || voice.lang.includes('en')
+            );
+            if (englishVoice) {
+              utterance.voice = englishVoice;
+            }
+          }
+          
+          // Android fix: Additional error handling
+          try {
+            window.speechSynthesis.speak(utterance);
+          } catch (error) {
+            console.error('Speech synthesis error:', error);
+            // Fallback: try again without voice selection
+            const fallbackUtterance = new SpeechSynthesisUtterance(text);
+            fallbackUtterance.rate = 0.8;
+            fallbackUtterance.volume = 0.7;
+            fallbackUtterance.lang = 'en-US';
+            window.speechSynthesis.speak(fallbackUtterance);
+          }
+        };
+        
+        // Android fix: Wait for voices to load if needed
+        const voices = window.speechSynthesis.getVoices();
+        if (voices.length === 0) {
+          // Voices not loaded yet, wait for them
+          window.speechSynthesis.addEventListener('voiceschanged', setVoiceAndSpeak, { once: true });
+          // Fallback timeout in case voiceschanged doesn't fire
+          setTimeout(setVoiceAndSpeak, 100);
+        } else {
+          setVoiceAndSpeak();
+        }
+      }, 50);
     }
   }
   
@@ -148,6 +181,30 @@
   $: backgroundTint = isDragging && Math.abs(translateX) > 20 ? 
     (swipeDirection === 'right' ? `rgba(34, 197, 94, ${swipeIntensity})` : `rgba(239, 68, 68, ${swipeIntensity})`) : 
     'transparent';
+
+  // Global keyboard event handling
+  onMount(() => {
+    const handleGlobalKeydown = (event) => {
+      // Only handle if no input elements are focused
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') {
+        return;
+      }
+      
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        handleUnknown(); // Hard
+      } else if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        handleKnown(); // Easy
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalKeydown);
+    
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeydown);
+    };
+  });
 </script>
 
 {#if currentCard}

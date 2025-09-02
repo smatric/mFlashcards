@@ -50,6 +50,18 @@
   function createPicker() {
     if (pickerApiLoaded && window.gapi.client.getToken()) {
       const token = getOAuthToken();
+      
+      // Check if token is expired by checking localStorage
+      const savedTokenExpiration = localStorage.getItem('google_token_expiration');
+      if (savedTokenExpiration) {
+        const expirationTime = parseInt(savedTokenExpiration);
+        const now = Date.now();
+        if (now >= expirationTime - 5 * 60 * 1000) {
+          alert('Your session has expired. Please refresh the page and sign in again.');
+          return;
+        }
+      }
+      
       const view = new google.picker.View(google.picker.ViewId.SPREADSHEETS);
       view.setMimeTypes("application/vnd.google-apps.spreadsheet");
       
@@ -61,6 +73,8 @@
         .build();
       
       picker.setVisible(true);
+    } else {
+      alert('Authentication required. Please refresh the page and sign in again.');
     }
   }
 
