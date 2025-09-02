@@ -1,7 +1,5 @@
 <script>
-  import { createEventDispatcher, onMount, onDestroy } from 'svelte';
-  import { flip } from 'svelte/animate';
-  import { scale } from 'svelte/transition';
+  import { createEventDispatcher, onMount } from 'svelte';
   
   const dispatch = createEventDispatcher();
   
@@ -30,11 +28,6 @@
   function handleUnknown() {
     dispatch('unknown');
   }
-  
-  function handleNext() {
-    dispatch('next');
-  }
-
 
   // Touch/Mouse event handlers for swiping
   function handleStart(e) {

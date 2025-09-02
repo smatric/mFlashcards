@@ -498,45 +498,6 @@
     resetSession();
   }
 
-  async function saveStats() {
-    if (!selectedSpreadsheetId || sessionStats.total === 0) return;
-    
-    // Check token validity before making API call
-    const tokenValid = await refreshTokenIfNeeded();
-    if (!tokenValid) {
-      console.log('❌ Token invalid and refresh failed');
-      alert('Your session has expired. Please sign in again.');
-      return;
-    }
-    
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const values = [[today, sessionStats.total, sessionStats.known, sessionStats.unknown]];
-      
-      await window.gapi.client.sheets.spreadsheets.values.append({
-        spreadsheetId: selectedSpreadsheetId,
-        range: 'StatsData!A:D',
-        valueInputOption: 'USER_ENTERED',
-        resource: { values }
-      });
-      
-      alert('Stats saved successfully!');
-      resetSession();
-    } catch (error) {
-      console.error('Error saving stats:', error);
-      
-      // Handle authentication errors
-      const authHandled = await handleAuthError(error);
-      if (authHandled) {
-        // Retry the operation
-        setTimeout(() => saveStats(), 1000);
-        return;
-      }
-      
-      alert('Error saving stats. Make sure you have a "StatsData" sheet with Date, Total, Known, Unknown columns.');
-    }
-  }
-
   $: currentCard = spreadsheetData[currentCardIndex];
   $: hasCards = spreadsheetData.length > 0;
 </script>
@@ -656,9 +617,6 @@
             >
               Sign Out
             </button>
-          </div>
-          <div class="mt-2">
-            <a href="/privacy-policy.html" class="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline">Privacy Policy</a>
           </div>
         </div>
       {:else if deckCompleted}
@@ -787,9 +745,6 @@
             >
               Sign Out
             </button>
-          </div>
-          <div class="mt-2">
-            <a href="/privacy-policy.html" class="text-xs text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300 underline">Privacy Policy</a>
           </div>
         </div>
       {/if}
