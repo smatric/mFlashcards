@@ -486,19 +486,118 @@
       await handleAuthError(error);
     }
   }
+  
+  async function logSessionStats() {
+    if (!selectedSpreadsheetId || sessionStats.total === 0) return;
+    
+    // Check token validity before making API call
+    const tokenValid = await refreshTokenIfNeeded();
+    if (!tokenValid) {
+      console.log('❌ Token invalid, skipping stats logging');
+      return;
+    }
+    
+    try {
+      const today = new Date();
+      const dateString = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+      
+      // Prepare the row data: Date, Easy Count, Hard Count, Total
+      const rowData = [
+        dateString,
+        sessionStats.known.toString(),
+        sessionStats.unknown.toString(),
+        sessionStats.total.toString()
+      ];
+      
+      // Append the row to the StatsData sheet
+      await window.gapi.client.sheets.spreadsheets.values.append({
+        spreadsheetId: selectedSpreadsheetId,
+        range: 'StatsData!A:D',
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        resource: {
+          values: [rowData]
+        }
+      });
+      
+      console.log(`Logged session stats: Date=${dateString}, Easy=${sessionStats.known}, Hard=${sessionStats.unknown}, Total=${sessionStats.total}`);
+      
+    } catch (error) {
+      console.error('Error logging session stats:', error);
+      
+      // If StatsData sheet doesn't exist, create it and try again
+      if (error.status === 400 && error.result?.error?.message?.includes('Unable to parse range')) {
+        try {
+          // Create the StatsData sheet
+          await window.gapi.client.sheets.spreadsheets.batchUpdate({
+            spreadsheetId: selectedSpreadsheetId,
+            resource: {
+              requests: [{
+                addSheet: {
+                  properties: {
+                    title: 'StatsData'
+                  }
+                }
+              }]
+            }
+          });
+          
+          // Add headers to the new sheet
+          await window.gapi.client.sheets.spreadsheets.values.update({
+            spreadsheetId: selectedSpreadsheetId,
+            range: 'StatsData!A1:D1',
+            valueInputOption: 'RAW',
+            resource: {
+              values: [['Date', 'Easy', 'Hard', 'Total']]
+            }
+          });
+          
+          // Now append the actual data
+          const today = new Date();
+          const dateString = today.toISOString().split('T')[0];
+          const rowData = [
+            dateString,
+            sessionStats.known.toString(),
+            sessionStats.unknown.toString(),
+            sessionStats.total.toString()
+          ];
+          
+          await window.gapi.client.sheets.spreadsheets.values.append({
+            spreadsheetId: selectedSpreadsheetId,
+            range: 'StatsData!A:D',
+            valueInputOption: 'RAW',
+            insertDataOption: 'INSERT_ROWS',
+            resource: {
+              values: [rowData]
+            }
+          });
+          
+          console.log('Created StatsData sheet and logged session stats');
+          
+        } catch (createError) {
+          console.error('Error creating StatsData sheet:', createError);
+        }
+      }
+      
+      // Handle authentication errors silently
+      await handleAuthError(error);
+    }
+  }
 
   function toggleStudyMode() {
     studyMode = studyMode === 'word-to-definition' ? 'definition-to-word' : 'word-to-definition';
     showDefinition = false; // Reset card flip when changing mode
   }
 
-  function nextCard() {
+  async function nextCard() {
     showDefinition = false;
     currentCardIndex = currentCardIndex + 1;
     
     // Check if we've reached the end of the deck
     if (currentCardIndex >= spreadsheetData.length) {
       deckCompleted = true;
+      // Log session stats when deck is completed
+      await logSessionStats();
     }
   }
 
@@ -506,14 +605,14 @@
     sessionStats.total++;
     sessionStats.known++;
     await updateSpacedRepetitionData(true); // Easy
-    nextCard();
+    await nextCard();
   }
 
   async function markUnknown() {
     sessionStats.total++;
     sessionStats.unknown++;
     await updateSpacedRepetitionData(false); // Hard
-    nextCard();
+    await nextCard();
   }
   
   async function updateSpacedRepetitionData(isEasy) {
