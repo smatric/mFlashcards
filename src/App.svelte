@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import Flashcard from './components/Flashcard.svelte';
   import Picker from './components/Picker.svelte';
+  import BottomStatus from './components/BottomStatus.svelte';
 
   let isSignedIn = false;
   let accessToken = null;
@@ -24,45 +25,57 @@
 
   function setupChunkLoadingErrorBoundary() {
     let lastReloadTime = 0;
-    const BASE_DELAY = 2000; // 2 seconds base delay
-
-    // Reset reload time on successful navigation
+    let failedAssets = new Set();
+    const BASE_DELAY = 1000; // 1 second base delay
+    
+    // Reset on successful navigation
     window.addEventListener('load', () => {
       lastReloadTime = 0;
+      failedAssets.clear();
     });
 
-    // Handle asset loading errors (JS/CSS 404s)
+    // Monitor all network requests for asset failures
+    const originalFetch = window.fetch;
+    window.fetch = function(...args) {
+      return originalFetch.apply(this, args).catch(error => {
+        const url = args[0];
+        if (typeof url === 'string' && /\-[a-zA-Z0-9]{8,}\.(js|css)/.test(url)) {
+          console.warn('Fetch failed for hashed asset:', url);
+          failedAssets.add(url);
+          checkForAssetFailures();
+        }
+        throw error;
+      });
+    };
+
+    // Handle script/link tag loading errors
     window.addEventListener('error', (event) => {
       const target = event.target || event.srcElement;
-      const isAssetError = target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK');
       
-      if (isAssetError) {
+      if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
         const src = target.src || target.href || '';
         const isHashedAsset = /\-[a-zA-Z0-9]{8,}\.(js|css)/.test(src);
         
         if (isHashedAsset) {
-          console.warn('Asset loading failed (likely due to deployment):', src);
-          reloadWithBackoff();
+          console.warn('Asset loading failed:', src);
+          failedAssets.add(src);
+          checkForAssetFailures();
         }
       }
-      
-      // Also check for runtime chunk loading errors
-      const error = event.error || {};
-      const message = event.message || error.message || '';
-      
-      const isChunkLoadingError = 
-        message.includes('Loading chunk') ||
-        message.includes('Loading CSS chunk') ||
-        message.includes('ChunkLoadError') ||
-        message.includes('Failed to import');
 
-      if (isChunkLoadingError) {
-        console.warn('Chunk loading error detected:', message);
-        reloadWithBackoff();
+      // Handle runtime errors that might indicate missing chunks
+      const message = event.message || '';
+      if (message.includes('Loading chunk') || 
+          message.includes('ChunkLoadError') || 
+          message.includes('Failed to import') ||
+          message.includes('Unexpected token') ||
+          message.includes('Cannot resolve')) {
+        console.warn('Runtime chunk error:', message);
+        triggerReload();
       }
-    });
+    }, true); // Use capture phase
 
-    // Handle unhandled promise rejections that might be chunk-related
+    // Handle promise rejections
     window.addEventListener('unhandledrejection', (event) => {
       const reason = event.reason || {};
       const message = reason.message || reason.toString() || '';
@@ -70,30 +83,61 @@
       if (message.includes('Loading chunk') || 
           message.includes('ChunkLoadError') ||
           message.includes('Failed to import') ||
-          message.includes('404')) {
-        console.warn('Unhandled chunk loading rejection:', message);
-        reloadWithBackoff();
+          message.includes('404') ||
+          message.includes('Unexpected token')) {
+        console.warn('Unhandled rejection (likely asset issue):', message);
+        triggerReload();
       }
     });
 
-    function reloadWithBackoff() {
+    // Periodically check if critical assets are missing
+    const assetCheck = setInterval(() => {
+      // Check if main app elements are present
+      if (document.getElementById('app') && document.getElementById('app').children.length === 0) {
+        // App div is empty, might indicate JS loading failure
+        const scripts = document.querySelectorAll('script[src*="-"][src$=".js"]');
+        for (const script of scripts) {
+          if (!script.getAttribute('data-loaded')) {
+            console.warn('Critical script may have failed to load:', script.src);
+            triggerReload();
+            break;
+          }
+        }
+      }
+    }, 5000);
+
+    function checkForAssetFailures() {
+      if (failedAssets.size > 0) {
+        console.warn(`${failedAssets.size} assets failed to load:`, Array.from(failedAssets));
+        triggerReload();
+      }
+    }
+
+    function triggerReload() {
       const now = Date.now();
       const timeSinceLastReload = now - lastReloadTime;
       
-      // Calculate delay with exponential back-off
-      const reloadCount = lastReloadTime === 0 ? 0 : Math.floor(timeSinceLastReload / BASE_DELAY) + 1;
-      const delay = BASE_DELAY * Math.pow(2, Math.min(reloadCount, 5)); // Cap at 64s max delay
-      
-      if (timeSinceLastReload >= delay || lastReloadTime === 0) {
+      // Only reload if enough time has passed
+      if (timeSinceLastReload > BASE_DELAY || lastReloadTime === 0) {
         lastReloadTime = now;
         
-        console.log(`Reloading page due to asset loading error (delay: ${delay}ms)`);
+        console.log('Reloading page due to asset loading issues...');
         
+        // Clear intervals before reload
+        clearInterval(assetCheck);
+        
+        // Force a hard reload
         setTimeout(() => {
-          window.location.reload();
-        }, delay);
+          window.location.reload(true);
+        }, 100);
       }
     }
+
+    // Mark scripts as loaded when they execute
+    const scripts = document.querySelectorAll('script[src]');
+    scripts.forEach(script => {
+      script.setAttribute('data-loaded', 'true');
+    });
   }
 
   onMount(async () => {
@@ -605,20 +649,7 @@
           </button>
         </div>
         
-        <!-- Bottom status -->
-        <div class="text-center mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
-          <div class="flex justify-center items-center gap-4">
-            <span class="text-gray-600 dark:text-gray-300 text-sm">
-{userProfile ? `Signed in as ${userProfile.name}` : 'Signed in'}
-            </span>
-            <button
-              on:click={signOut}
-              class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 text-sm"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
+        <BottomStatus {userProfile} {signOut} />
       {:else if deckCompleted}
         <!-- Deck Completion Screen -->
         <div class="text-center">
@@ -683,20 +714,7 @@
             </div>
           </div>
           
-          <!-- Bottom status -->
-          <div class="text-center mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <div class="flex justify-center items-center gap-4">
-              <span class="text-gray-600 dark:text-gray-300 text-sm">
-  {userProfile ? `Signed in as ${userProfile.name}` : 'Signed in'}
-              </span>
-              <button
-                on:click={signOut}
-                class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 text-sm"
-              >
-                Sign Out
-              </button>
-            </div>
-          </div>
+          <BottomStatus {userProfile} {signOut} />
         </div>
       {:else}
         <div class="text-center">
@@ -715,38 +733,13 @@
             </button>
           </div>
           
-          <!-- Bottom status -->
-          <div class="text-center mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <div class="flex justify-center items-center gap-4">
-              <span class="text-gray-600 dark:text-gray-300 text-sm">
-  {userProfile ? `Signed in as ${userProfile.name}` : 'Signed in'}
-              </span>
-              <button
-                on:click={signOut}
-                class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 text-sm"
-              >
-                Sign Out
-              </button>
-            </div>
-          </div>
+          <BottomStatus {userProfile} {signOut} />
         </div>
       {/if}
       
       <!-- Bottom status for picker and loading screens -->
       {#if !hasCards || isLoading}
-        <div class="text-center mt-8 pt-4 border-t border-gray-200 dark:border-gray-700">
-          <div class="flex justify-center items-center gap-4">
-            <span class="text-gray-600 dark:text-gray-300 text-sm">
-{userProfile ? `Signed in as ${userProfile.name}` : 'Signed in'}
-            </span>
-            <button
-              on:click={signOut}
-              class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg transition-colors duration-200 text-sm"
-            >
-              Sign Out
-            </button>
-          </div>
-        </div>
+        <BottomStatus {userProfile} {signOut} />
       {/if}
     {/if}
   </div>
