@@ -23,128 +23,9 @@
   let gis;
   let tokenRefreshInterval;
 
-  function setupChunkLoadingErrorBoundary() {
-    let lastReloadTime = 0;
-    let failedAssets = new Set();
-    const BASE_DELAY = 1000; // 1 second base delay
-    
-    // Reset on successful navigation
-    window.addEventListener('load', () => {
-      lastReloadTime = 0;
-      failedAssets.clear();
-    });
-
-    // Monitor all network requests for asset failures
-    const originalFetch = window.fetch;
-    window.fetch = function(...args) {
-      return originalFetch.apply(this, args).catch(error => {
-        const url = args[0];
-        if (typeof url === 'string' && /\-[a-zA-Z0-9]{8,}\.(js|css)/.test(url)) {
-          console.warn('Fetch failed for hashed asset:', url);
-          failedAssets.add(url);
-          checkForAssetFailures();
-        }
-        throw error;
-      });
-    };
-
-    // Handle script/link tag loading errors
-    window.addEventListener('error', (event) => {
-      const target = event.target || event.srcElement;
-      
-      if (target && (target.tagName === 'SCRIPT' || target.tagName === 'LINK')) {
-        const src = target.src || target.href || '';
-        const isHashedAsset = /\-[a-zA-Z0-9]{8,}\.(js|css)/.test(src);
-        
-        if (isHashedAsset) {
-          console.warn('Asset loading failed:', src);
-          failedAssets.add(src);
-          checkForAssetFailures();
-        }
-      }
-
-      // Handle runtime errors that might indicate missing chunks
-      const message = event.message || '';
-      if (message.includes('Loading chunk') || 
-          message.includes('ChunkLoadError') || 
-          message.includes('Failed to import') ||
-          message.includes('Unexpected token') ||
-          message.includes('Cannot resolve')) {
-        console.warn('Runtime chunk error:', message);
-        triggerReload();
-      }
-    }, true); // Use capture phase
-
-    // Handle promise rejections
-    window.addEventListener('unhandledrejection', (event) => {
-      const reason = event.reason || {};
-      const message = reason.message || reason.toString() || '';
-      
-      if (message.includes('Loading chunk') || 
-          message.includes('ChunkLoadError') ||
-          message.includes('Failed to import') ||
-          message.includes('404') ||
-          message.includes('Unexpected token')) {
-        console.warn('Unhandled rejection (likely asset issue):', message);
-        triggerReload();
-      }
-    });
-
-    // Periodically check if critical assets are missing
-    const assetCheck = setInterval(() => {
-      // Check if main app elements are present
-      if (document.getElementById('app') && document.getElementById('app').children.length === 0) {
-        // App div is empty, might indicate JS loading failure
-        const scripts = document.querySelectorAll('script[src*="-"][src$=".js"]');
-        for (const script of scripts) {
-          if (!script.getAttribute('data-loaded')) {
-            console.warn('Critical script may have failed to load:', script.src);
-            triggerReload();
-            break;
-          }
-        }
-      }
-    }, 5000);
-
-    function checkForAssetFailures() {
-      if (failedAssets.size > 0) {
-        console.warn(`${failedAssets.size} assets failed to load:`, Array.from(failedAssets));
-        triggerReload();
-      }
-    }
-
-    function triggerReload() {
-      const now = Date.now();
-      const timeSinceLastReload = now - lastReloadTime;
-      
-      // Only reload if enough time has passed
-      if (timeSinceLastReload > BASE_DELAY || lastReloadTime === 0) {
-        lastReloadTime = now;
-        
-        console.log('Reloading page due to asset loading issues...');
-        
-        // Clear intervals before reload
-        clearInterval(assetCheck);
-        
-        // Force a hard reload
-        setTimeout(() => {
-          window.location.reload(true);
-        }, 100);
-      }
-    }
-
-    // Mark scripts as loaded when they execute
-    const scripts = document.querySelectorAll('script[src]');
-    scripts.forEach(script => {
-      script.setAttribute('data-loaded', 'true');
-    });
-  }
 
   onMount(async () => {
     if (typeof window !== 'undefined') {
-      // Initialize chunk loading error boundary with exponential back-off
-      setupChunkLoadingErrorBoundary();
-      
       await waitForGoogleAPIs();
       await initializeGapi();
       await initializeGis();
@@ -438,7 +319,7 @@
       
       const response = await window.gapi.client.sheets.spreadsheets.values.get({
         spreadsheetId: selectedSpreadsheetId,
-        range: 'mFlashcards!A:B',
+        range: 'mFlashcards!A:D',
       });
       
       const rows = response.result.values || [];
@@ -453,10 +334,45 @@
       }
       
       // Skip header row and process data
-      spreadsheetData = rows.slice(1).map(([word, definition]) => ({
+      const allFlashcards = rows.slice(1).map(([word, definition, lastReviewed, interval], index) => ({
         word: word || '',
-        definition: definition || ''
+        definition: definition || '',
+        lastReviewed: lastReviewed || '',
+        interval: interval || '',
+        originalRowIndex: index + 2 // +2 because we skipped header and array is 0-indexed
       })).filter(item => item.word && item.definition);
+      
+      // Apply spaced repetition filtering
+      const today = new Date();
+      today.setHours(0, 0, 0, 0); // Normalize to start of day
+      
+      spreadsheetData = allFlashcards.filter(item => {
+        // If no lastReviewed date, show the card
+        if (!item.lastReviewed) {
+          return true;
+        }
+        
+        // Parse the last reviewed date
+        const lastReviewedDate = new Date(item.lastReviewed);
+        if (isNaN(lastReviewedDate.getTime())) {
+          // Invalid date, show the card
+          return true;
+        }
+        
+        // Parse the interval (default to 1 if empty or invalid)
+        let intervalDays = parseInt(item.interval);
+        if (isNaN(intervalDays) || intervalDays < 1) {
+          intervalDays = 1;
+        }
+        
+        // Calculate next review date
+        const nextReviewDate = new Date(lastReviewedDate);
+        nextReviewDate.setDate(nextReviewDate.getDate() + intervalDays);
+        nextReviewDate.setHours(0, 0, 0, 0); // Normalize to start of day
+        
+        // Show card if today >= next review date
+        return today >= nextReviewDate;
+      });
       
       if (spreadsheetData.length === 0) {
         throw new Error('No valid flashcard pairs found. Make sure both Word and Definition columns have data.');
@@ -509,6 +425,67 @@
     sessionStats = { total: 0, known: 0, unknown: 0 };
     deckCompleted = false;
   }
+  
+  async function resetDeck() {
+    const confirmed = confirm('Are you sure you want to reset all progress? This will set all word intervals back to 1 day.');
+    if (!confirmed) {
+      return;
+    }
+    
+    await resetAllIntervalsToOne();
+    // Reload the spreadsheet data to get all cards (not just spaced repetition filtered ones)
+    await loadSpreadsheetData();
+  }
+  
+  async function resetAllIntervalsToOne() {
+    if (!selectedSpreadsheetId || !spreadsheetData.length) return;
+    
+    // Check token validity before making API call
+    const tokenValid = await refreshTokenIfNeeded();
+    if (!tokenValid) {
+      console.log('❌ Token invalid, skipping interval reset');
+      return;
+    }
+    
+    try {
+      // Get all the original flashcard data (including filtered out ones)
+      const response = await window.gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: selectedSpreadsheetId,
+        range: 'mFlashcards!A:D',
+      });
+      
+      const rows = response.result.values || [];
+      if (rows.length <= 1) return; // No data rows to update
+      
+      // Create array of "1" values for all data rows (skip header)
+      const dataRowCount = rows.length - 1;
+      const intervalValues = Array(dataRowCount).fill(['1']);
+      
+      // Update all intervals at once using batch update
+      const range = `mFlashcards!D2:D${rows.length}`; // Column D starting from row 2
+      
+      await window.gapi.client.sheets.spreadsheets.values.update({
+        spreadsheetId: selectedSpreadsheetId,
+        range: range,
+        valueInputOption: 'RAW',
+        resource: {
+          values: intervalValues
+        }
+      });
+      
+      console.log(`Reset all ${dataRowCount} intervals to 1`);
+      
+      // Update local data to reflect the changes
+      spreadsheetData.forEach(card => {
+        card.interval = '1';
+      });
+      
+    } catch (error) {
+      console.error('Error resetting intervals:', error);
+      // Handle authentication errors silently
+      await handleAuthError(error);
+    }
+  }
 
   function toggleStudyMode() {
     studyMode = studyMode === 'word-to-definition' ? 'definition-to-word' : 'word-to-definition';
@@ -525,21 +502,81 @@
     }
   }
 
-  function markKnown() {
+  async function markKnown() {
     sessionStats.total++;
     sessionStats.known++;
+    await updateSpacedRepetitionData(true); // Easy
     nextCard();
   }
 
-  function markUnknown() {
+  async function markUnknown() {
     sessionStats.total++;
     sessionStats.unknown++;
+    await updateSpacedRepetitionData(false); // Hard
     nextCard();
   }
+  
+  async function updateSpacedRepetitionData(isEasy) {
+    if (!selectedSpreadsheetId || !currentCard) return;
+    
+    // Check token validity before making API call
+    const tokenValid = await refreshTokenIfNeeded();
+    if (!tokenValid) {
+      console.log('❌ Token invalid, skipping spaced repetition update');
+      return;
+    }
+    
+    try {
+      const today = new Date();
+      const todayString = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+      
+      // Calculate new interval
+      let newInterval = 1;
+      const currentInterval = parseInt(currentCard.interval);
+      
+      if (currentInterval && !isNaN(currentInterval)) {
+        if (isEasy) {
+          // Easy: multiply by 1.5 and round half up
+          newInterval = Math.floor(currentInterval * 1.5 + 0.5);
+        } else {
+          // Hard: multiply by 2/3 and round half down, minimum 1
+          newInterval = Math.max(1, Math.floor(currentInterval * (2/3)));
+        }
+      }
+      
+      // Update the spreadsheet using the original row index
+      const range = `mFlashcards!C${currentCard.originalRowIndex}:D${currentCard.originalRowIndex}`;
+      const values = [[todayString, newInterval.toString()]];
+      
+      await window.gapi.client.sheets.spreadsheets.values.update({
+        spreadsheetId: selectedSpreadsheetId,
+        range: range,
+        valueInputOption: 'RAW',
+        resource: {
+          values: values
+        }
+      });
+      
+      console.log(`Updated card at row ${currentCard.originalRowIndex}: Last Reviewed = ${todayString}, Interval = ${newInterval}`);
+      console.log(`Update range: ${range}`);
+      console.log(`Update values:`, values);
+      
+      // Update the local data to reflect the changes
+      currentCard.lastReviewed = todayString;
+      currentCard.interval = newInterval.toString();
+      
+    } catch (error) {
+      console.error('Error updating spaced repetition data:', error);
+      // Don't show error to user as this is background functionality
+      
+      // Handle authentication errors silently
+      await handleAuthError(error);
+    }
+  }
 
-  function restartDeck() {
-    shuffleArray(spreadsheetData);
-    resetSession();
+  async function restartDeck() {
+    // Reload spreadsheet data to apply current spaced repetition filtering
+    await loadSpreadsheetData();
   }
 
   $: currentCard = spreadsheetData[currentCardIndex];
@@ -592,7 +629,7 @@
             </div>
             
             <button
-              on:click={resetSession}
+              on:click={resetDeck}
               class="bg-orange-500 hover:bg-orange-600 text-white px-3 py-2 rounded-lg text-sm transition-colors duration-200 font-medium"
             >
               Reset Deck
@@ -700,7 +737,7 @@
                 on:click={restartDeck}
                 class="bg-blue-500 hover:bg-blue-600 text-white font-medium px-6 py-3 rounded-lg transition-colors duration-200"
               >
-                🔄 Study Again
+                Study Again
               </button>
             </div>
             
