@@ -6,38 +6,31 @@ This is a vibe-coded, Svelte-based flashcard web app that integrates with **Goog
 - Authenticate with your Google account (OAuth2).
 - Select a spreadsheet from Google Drive.
 - Load words and definitions from the selected spreadsheet.
-- Review flashcards (word → definition OR definition → word).
-- Save stats (reviewed, known, unknown) back into Google Sheets.
+- Review flashcards with **spaced repetition** algorithm (word → definition OR definition → word).
+- Track review history and automatically adjust review intervals based on performance.
+- Save stats (Easy/Hard responses) back into Google Sheets.
 - Tokens are stored in `localStorage` for persistent sessions.
 
 ---
 
-### 1. Run Locally
-```bash
-npm run dev
-```
-Visit: [http://localhost:3000](http://localhost:3000)
-
-### 2. Build & Deploy
-For GitHub Pages:
-```bash
-npm run build
-```
-
----
-
 ## 📑 Google Sheets Structure
-Be default "mFlashcards" spreadsheet is loaded. If not found, the app will prompt you to select a spreadsheet.
+By default, "mFlashcards" spreadsheet is loaded. 
+If not found, the app will prompt you to select a spreadsheet.
+
+**Spaced Repetition**: The app tracks when each card was last reviewed and calculates the next review date based on your performance. Cards marked as "Easy" will have longer intervals before appearing again, while "Hard" cards will appear more frequently.
 
 You need **two sheets** in the same document:
 
 ### `mFlashcards`
-| Word       | Definition           |
-|------------|----------------------|
-| desist     | to stop              |
-| nascent    | just beginning       |
+| Word       | Definition           | Last Reviewed | Interval |
+|------------|----------------------|---------------|----------|
+| desist     | to stop              | 2025-09-04    | 3        |
+| nascent    | just beginning       | 2025-09-03    | 7        |
+
+- **Last Reviewed**: Date when the flashcard was last studied (YYYY-MM-DD format)
+- **Interval**: Number of days until the card should appear again for review
 
 ### `StatsData`
-| Date       | Total | Known | Unknown |
-|------------|-------|-------|---------|
-| 2025-08-26 | 20    | 15    | 5       |
+| Date       | Easy  | Hard  | Total |
+|------------|-------|-------|-------|
+| 2025-08-26 | 15    | 5     | 20    |
