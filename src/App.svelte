@@ -513,7 +513,7 @@
       await window.gapi.client.sheets.spreadsheets.values.append({
         spreadsheetId: selectedSpreadsheetId,
         range: 'StatsData!A:D',
-        valueInputOption: 'USER_ENTERED',
+        valueInputOption: 'RAW',
         insertDataOption: 'INSERT_ROWS',
         resource: {
           values: [rowData]
@@ -546,7 +546,7 @@
           await window.gapi.client.sheets.spreadsheets.values.update({
             spreadsheetId: selectedSpreadsheetId,
             range: 'StatsData!A1:D1',
-            valueInputOption: 'USER_ENTERED',
+            valueInputOption: 'RAW',
             resource: {
               values: [['Date', 'Easy', 'Hard', 'Total']]
             }
@@ -565,7 +565,7 @@
           await window.gapi.client.sheets.spreadsheets.values.append({
             spreadsheetId: selectedSpreadsheetId,
             range: 'StatsData!A:D',
-            valueInputOption: 'USER_ENTERED',
+            valueInputOption: 'RAW',
             insertDataOption: 'INSERT_ROWS',
             resource: {
               values: [rowData]
